@@ -81,6 +81,19 @@ export const App: React.FC = () => {
         </svg>
         <span>{isPicking ? 'Selecting...' : 'Pick Element'}</span>
       </button>
+
+      {/* Feedback link */}
+      <a
+        href="https://github.com/ylfeng250/style-extractor/issues"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={styles.feedback}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+        </svg>
+        <span>Feedback</span>
+      </a>
     </div>
   );
 };
@@ -165,5 +178,16 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '8px',
+  },
+  feedback: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    marginTop: '14px',
+    fontSize: '12px',
+    color: 'rgba(255, 255, 255, 0.4)',
+    textDecoration: 'none',
+    transition: 'color 0.15s ease',
   },
 };
