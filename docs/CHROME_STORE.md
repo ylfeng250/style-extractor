@@ -31,10 +31,6 @@ Precisely extract HTML and CSS styles from web elements. Supports CSS variables,
 6. Click the "Extract" button to get styles
 7. View, copy, or download the extracted code in the results page
 
-### ⌨️ Keyboard Shortcuts
-
-- `Alt + Shift + S` - Quick start element selection
-
 ### 🔧 Technical Features
 
 - Based on Chrome DevTools Protocol for precise and reliable extraction

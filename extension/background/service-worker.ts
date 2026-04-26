@@ -71,17 +71,6 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         .catch(err => sendResponse({ error: err.message }));
       return true;
     }
-
-    case 'START_PICKING_FROM_SHORTCUT': {
-      const tabId = sender.tab?.id;
-      if (tabId) {
-        chrome.tabs.sendMessage(tabId, { type: 'START_PICKING' })
-          .then(() => sendResponse({ success: true }))
-          .catch(err => sendResponse({ error: err.message }));
-        return true;
-      }
-      break;
-    }
   }
 
   return false;

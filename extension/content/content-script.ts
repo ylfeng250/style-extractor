@@ -84,19 +84,6 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return false;
 });
 
-/**
- * 监听键盘快捷键
- */
-document.addEventListener('keydown', (e) => {
-  // Alt+Shift+S 启动选择
-  if (e.altKey && e.shiftKey && e.key === 'S') {
-    e.preventDefault();
-    if (!isSelecting) {
-      chrome.runtime.sendMessage({ type: 'START_PICKING_FROM_SHORTCUT' });
-    }
-  }
-});
-
 console.log('[Style Extractor] Content script loaded');
 
 /**

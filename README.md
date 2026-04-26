@@ -81,7 +81,6 @@ The Options page opens automatically showing:
 
 ## Keyboard Shortcuts
 
-- `Alt + Shift + S` - Quick start element selection (where supported)
 - `ESC` - Cancel selection mode
 
 ## Technical Stack

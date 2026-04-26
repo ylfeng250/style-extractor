@@ -81,15 +81,6 @@ export const App: React.FC = () => {
         </svg>
         <span>{isPicking ? 'Selecting...' : 'Pick Element'}</span>
       </button>
-
-      {/* 快捷键提示 */}
-      <div style={styles.hint}>
-        <kbd style={styles.kbd}>Alt</kbd>
-        <span style={styles.plus}>+</span>
-        <kbd style={styles.kbd}>Shift</kbd>
-        <span style={styles.plus}>+</span>
-        <kbd style={styles.kbd}>S</kbd>
-      </div>
     </div>
   );
 };
@@ -174,30 +165,5 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '8px',
-  },
-  hint: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '4px',
-    marginTop: '14px',
-  },
-  kbd: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: '22px',
-    height: '20px',
-    padding: '0 5px',
-    fontSize: '10px',
-    fontWeight: 500,
-    color: 'rgba(255, 255, 255, 0.5)',
-    background: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: '4px',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
-  },
-  plus: {
-    color: 'rgba(255, 255, 255, 0.3)',
-    fontSize: '10px',
   },
 };
