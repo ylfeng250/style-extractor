@@ -1,9 +1,12 @@
-name: Build Extension
+name: Build and Release
 
 on:
   push:
     branches:
       - master
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -40,3 +43,11 @@ jobs:
           name: style-extractor-v${{ steps.version.outputs.version }}
           path: style-extractor-v${{ steps.version.outputs.version }}.zip
           retention-days: 30
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          files: style-extractor-v${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
