@@ -45,10 +45,10 @@ export function assembleStyles(
 
   // 0. 添加标题头
   parts.push(`/* ============================================ */`);
-  parts.push(`/* Style Extractor - 提取的样式               */`);
-  parts.push(`/* 选择器: ${selector} */`);
+  parts.push(`/* Style Extractor - Extracted Styles          */`);
+  parts.push(`/* Selector: ${selector} */`);
   if (pseudoStates.length > 0) {
-    parts.push(`/* 激活的伪类: ${pseudoStates.join(', ')} */`);
+    parts.push(`/* Active pseudo-classes: ${pseudoStates.join(', ')} */`);
   }
   parts.push(`/* ============================================ */\n`);
 
@@ -127,7 +127,7 @@ export function assembleStyles(
       const value = allVarDefinitions.get(varName);
       if (value !== undefined) {
         if (unresolved.has(varName)) {
-          varDeclarations.push(`  ${varName}: ${value}; /* 从计算样式获取 */`);
+          varDeclarations.push(`  ${varName}: ${value}; /* From computed styles */`);
         } else {
           varDeclarations.push(`  ${varName}: ${value};`);
         }
@@ -140,7 +140,7 @@ export function assembleStyles(
   }
 
   if (cssVarParts.length > 0) {
-    cssVariables = `/* ========== CSS 变量 ========== */\n${cssVarParts.join('\n\n')}\n`;
+    cssVariables = `/* ========== CSS Variables ========== */\n${cssVarParts.join('\n\n')}\n`;
     parts.push(cssVariables);
   }
 
@@ -152,7 +152,7 @@ export function assembleStyles(
     if (computedStyles) {
       cssText = replaceVariablesWithComputed(cssText, computedStyles);
     }
-    inlineCSS = `/* 内联样式 */\n${selector} { ${cssText} }\n`;
+    inlineCSS = `/* Inline Styles */\n${selector} { ${cssText} }\n`;
     parts.push(inlineCSS);
   }
 
@@ -196,7 +196,7 @@ export function assembleStyles(
     }
 
     if (rulesText.length > 0) {
-      matchedCSS = `/* ========== 匹配的 CSS 规则 ========== */\n${rulesText.join('\n\n')}\n`;
+      matchedCSS = `/* ========== Matched CSS Rules ========== */\n${rulesText.join('\n\n')}\n`;
       parts.push('\n' + matchedCSS);
     }
   }
@@ -249,7 +249,7 @@ export function assembleStyles(
     }
 
     if (pseudoParts.length > 0) {
-      pseudoElementCSS = `/* ========== 伪元素样式 (::before, ::after) ========== */\n${pseudoParts.join('\n\n')}\n`;
+      pseudoElementCSS = `/* ========== Pseudo Elements (::before, ::after) ========== */\n${pseudoParts.join('\n\n')}\n`;
       parts.push('\n' + pseudoElementCSS);
     }
   }
@@ -263,11 +263,11 @@ export function assembleStyles(
     for (let i = stylesData.inherited.length - 1; i >= 0; i--) {
       const inherited = stylesData.inherited[i];
       const depth = stylesData.inherited.length - i;
-      const depthLabel = depth === 1 ? '父元素' : depth === 2 ? '祖父元素' : `第${depth}层祖先`;
+      const depthLabel = depth === 1 ? 'Parent' : depth === 2 ? 'Grandparent' : `Ancestor Level ${depth}`;
 
       // 处理继承的内联样式
       if (inherited.inlineStyle?.cssText) {
-        inheritedParts.push(`/* ${depthLabel}内联样式 */\n${selector} {\n  /* 继承自 ${depthLabel} */\n  ${formatStyleText(filterInheritedProperties(inherited.inlineStyle.cssText))}\n}`);
+        inheritedParts.push(`/* ${depthLabel} Inline Styles */\n${selector} {\n  /* Inherited from ${depthLabel} */\n  ${formatStyleText(filterInheritedProperties(inherited.inlineStyle.cssText))}\n}`);
       }
 
       // 处理继承的匹配规则
@@ -294,7 +294,7 @@ export function assembleStyles(
             // 只保留可继承的属性
             const inheritedProps = filterInheritedProperties(styleText);
             if (inheritedProps.trim()) {
-              parentRules.push(`${ruleSelectorText} {\n  /* 影响 ${depthLabel} */\n  ${formatStyleText(inheritedProps)}\n}`);
+              parentRules.push(`${ruleSelectorText} {\n  /* Affects ${depthLabel} */\n  ${formatStyleText(inheritedProps)}\n}`);
             }
 
             if (rule.rule.styleSheetId) {
@@ -304,13 +304,13 @@ export function assembleStyles(
         }
 
         if (parentRules.length > 0) {
-          inheritedParts.push(`/* ${depthLabel}样式规则 */\n${parentRules.join('\n\n')}`);
+          inheritedParts.push(`/* ${depthLabel} Style Rules */\n${parentRules.join('\n\n')}`);
         }
       }
     }
 
     if (inheritedParts.length > 0) {
-      inheritedCSS = `/* ========== 继承样式 (来自父级元素) ========== */\n${inheritedParts.join('\n\n')}\n`;
+      inheritedCSS = `/* ========== Inherited Styles (from parent elements) ========== */\n${inheritedParts.join('\n\n')}\n`;
       parts.push('\n' + inheritedCSS);
     }
   }
@@ -318,9 +318,9 @@ export function assembleStyles(
   // 6. 添加字体信息注释
   let fontInfo = '';
   if (fonts.length > 0) {
-    fontInfo = '/* ========== 使用的字体 ========== */\n';
+    fontInfo = '/* ========== Fonts Used ========== */\n';
     for (const font of fonts) {
-      fontInfo += `/* ${font.familyName}${font.isCustomFont ? ' (自定义字体)' : ' (系统字体)'} - ${font.glyphCount} 个字形 */\n`;
+      fontInfo += `/* ${font.familyName}${font.isCustomFont ? ' (Custom Font)' : ' (System Font)'} - ${font.glyphCount} glyphs */\n`;
     }
     parts.push('\n' + fontInfo);
   }
@@ -592,7 +592,7 @@ export async function fetchExternalStylesheets(
     try {
       const text = await getStyleSheetText(styleSheetId);
       if (text) {
-        parts.push(`/* 样式表: ${styleSheetId} */\n${text}`);
+        parts.push(`/* Stylesheet: ${styleSheetId} */\n${text}`);
       }
     } catch (err) {
       console.warn(`Failed to fetch stylesheet ${styleSheetId}:`, err);

@@ -89,19 +89,19 @@ async function handleElementSelected(
   let nodeId: number | null = null;
 
   try {
-    // 1. 附加调试器
+    // 1. Attach debugger
     await client.attach();
 
-    // 2. 等待一小段时间确保 DOM 稳定，然后查询节点 ID
+    // 2. Wait briefly for DOM to stabilize, then query node ID
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // 3. 获取文档根节点，然后从根节点查询
+    // 3. Get document root node, then query from root
     const documentNodeId = await client.getDocument();
     if (!documentNodeId) {
-      throw new Error('无法获取文档根节点');
+      throw new Error('Unable to get document root node');
     }
 
-    // 4. 查询节点 ID（带重试）
+    // 4. Query node ID (with retry)
     let retries = 3;
     while (retries > 0) {
       nodeId = await client.querySelector(selector, documentNodeId);
@@ -113,10 +113,10 @@ async function handleElementSelected(
     }
 
     if (!nodeId) {
-      throw new Error(`无法定位元素: ${selector}。请尝试重新选择。`);
+      throw new Error(`Unable to locate element: ${selector}. Please try re-selecting.`);
     }
 
-    // 5. 强制激活伪类状态
+    // 5. Force pseudo-class states
     try {
       await client.forcePseudoState(nodeId, {
         hover: pseudoStates.includes('hover'),
@@ -129,10 +129,10 @@ async function handleElementSelected(
       // 继续执行，不强制退出
     }
 
-    // 6. 获取匹配样式
+    // 6. Get matched styles
     const stylesData = await client.getMatchedStylesForNode(nodeId);
 
-    // 7. 获取 html 元素样式（用于提取 :root 中的 CSS 变量）
+    // 7. Get html element styles (for extracting CSS variables from :root)
     let rootStyles = null;
     try {
       const htmlNodeId = await client.querySelector('html', documentNodeId);
@@ -143,7 +143,7 @@ async function handleElementSelected(
       console.warn('Failed to get html styles:', err);
     }
 
-    // 8. 收集所有相关的样式表 ID
+    // 8. Collect all related stylesheet IDs
     const styleSheetIds = new Set<string>();
 
     // 从匹配规则中收集
@@ -192,7 +192,7 @@ async function handleElementSelected(
       }
     }
 
-    // 9. 获取所有样式表文本，从中提取 CSS 变量定义
+    // 9. Get all stylesheet texts, extract CSS variable definitions
     const allStylesheetTexts: string[] = [];
     const allCSSVariableDefinitions = new Map<string, string>();
 
@@ -209,13 +209,13 @@ async function handleElementSelected(
       }
     }
 
-    // 10. 获取字体信息
+    // 10. Get font information
     const fonts = await client.getPlatformFontsForNode(nodeId);
 
-    // 11. 获取元素 HTML
+    // 11. Get element HTML
     const outerHTML = await client.getOuterHTML(nodeId);
 
-    // 12. 获取计算样式（用于策略 D：替换未解析的 CSS 变量）
+    // 12. Get computed styles (for Strategy D: replacing unresolved CSS variables)
     let computedStyles: Record<string, string> | undefined;
     try {
       computedStyles = await client.getComputedStyleForNode(nodeId);
@@ -223,7 +223,7 @@ async function handleElementSelected(
       console.warn('Failed to get computed styles:', err);
     }
 
-    // 13. 组装样式，传入所有 CSS 变量定义
+    // 13. Assemble styles, passing all CSS variable definitions
     const assembled = assembleStyles(
       stylesData,
       fonts,
@@ -234,12 +234,12 @@ async function handleElementSelected(
       allCSSVariableDefinitions  // 新增：传入预先提取的所有 CSS 变量
     );
 
-    // 14. 构建最终结果
-    const externalCSS = allStylesheetTexts.map((text, i) => `/* 样式表 ${i + 1} */\n${text}`).join('\n\n');
+    // 14. Build final result
+    const externalCSS = allStylesheetTexts.map((text, i) => `/* Stylesheet ${i + 1} */\n${text}`).join('\n\n');
 
     const result: StyleExtractionResult = {
       html: outerHTML,
-      css: assembled.css + (externalCSS ? '\n\n/* ========== 外链样式表 ========== */\n' + externalCSS : ''),
+      css: assembled.css + (externalCSS ? '\n\n/* ========== External Stylesheets ========== */\n' + externalCSS : ''),
       inlineCSS: assembled.inlineCSS,
       matchedCSS: assembled.matchedCSS,
       inheritedCSS: assembled.inheritedCSS,
@@ -256,17 +256,17 @@ async function handleElementSelected(
       },
     };
 
-    // 15. 保存到存储
+    // 15. Save to storage
     await chrome.storage.local.set({ extractResult: result });
 
-    // 16. 通知 popup 提取完成（可能失败，忽略错误）
+    // 16. Notify popup of completion (may fail, ignore errors)
     try {
       await chrome.runtime.sendMessage({ type: 'EXTRACT_COMPLETE' });
     } catch {
       // Popup 可能已关闭，忽略
     }
 
-    // 17. 自动打开 options 页面显示结果
+    // 17. Automatically open options page to display results
     try {
       await chrome.runtime.openOptionsPage();
     } catch (e) {
@@ -279,7 +279,7 @@ async function handleElementSelected(
     try {
       await chrome.runtime.sendMessage({
         type: 'EXTRACT_ERROR',
-        error: error instanceof Error ? error.message : '提取失败',
+        error: error instanceof Error ? error.message : 'Extraction failed',
       });
     } catch {
       // 忽略
