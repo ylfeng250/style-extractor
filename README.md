@@ -2,6 +2,8 @@
 
 A Chrome extension for precise HTML and CSS extraction using Chrome Debugger API. Extract styles from any web element with full support for pseudo-elements, pseudo-classes, and inherited styles.
 
+![](./image.png)
+
 ## Features
 
 - **Precise Element Selection** - Visual element picker with real-time highlighting, navigate parent/child elements easily

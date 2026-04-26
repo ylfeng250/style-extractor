@@ -1,6 +1,7 @@
 # Style Extractor
 
 基于 Chrome Debugger API 的网页样式精准提取扩展，支持对任意网页元素的 HTML 和 CSS 进行精准提取。
+![](./image.png)
 
 ## 功能特性
 
