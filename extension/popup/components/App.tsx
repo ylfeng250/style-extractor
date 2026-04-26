@@ -16,12 +16,12 @@ export const App: React.FC = () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
       if (!tab?.id) {
-        setError('无法获取当前标签页');
+        setError('Unable to get current tab');
         return;
       }
 
       if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-        setError('无法在此页面使用扩展');
+        setError('Cannot use on this page');
         return;
       }
 
@@ -30,7 +30,7 @@ export const App: React.FC = () => {
       window.close();
     } catch (err) {
       console.error('Failed to start picking:', err);
-      setError('启动失败，请刷新页面后重试');
+      setError('Failed to start. Please refresh the page and try again');
     }
   }, []);
 
@@ -79,7 +79,7 @@ export const App: React.FC = () => {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
         </svg>
-        <span>{isPicking ? '选择中...' : '选取元素'}</span>
+        <span>{isPicking ? 'Selecting...' : 'Pick Element'}</span>
       </button>
 
       {/* 快捷键提示 */}

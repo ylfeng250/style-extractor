@@ -13,10 +13,10 @@ export const OptionsPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    // 加载结果
+    // Load result
     loadResult();
 
-    // 监听更新
+    // Listen for updates
     const handleMessage = (message: { type: string }) => {
       if (message.type === 'EXTRACT_COMPLETE') {
         loadResult();
@@ -49,17 +49,17 @@ export const OptionsPage: React.FC = () => {
     if (!result) return;
 
     const fullHTML = `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Extracted Style - ${result.metadata.selector}</title>
   <style>
-/* 基础重置 */
+/* Reset */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; background: #f5f5f5; }
 
-/* 提取的样式 */
+/* Extracted styles */
 ${result.css}
   </style>
 </head>
@@ -72,7 +72,7 @@ ${result.html}
     const url = URL.createObjectURL(blob);
     const filename = `extracted-${result.metadata.selector.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`;
 
-    // 创建下载链接
+    // Create download link
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -106,7 +106,7 @@ ${result.html}
   const getPreviewHTML = (): string => {
     if (!result) return '';
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -132,53 +132,53 @@ ${result.html}
             <path d="M15 9l-3-3-3 3" />
           </svg>
         </div>
-        <h2 style={styles.emptyTitle}>暂无提取结果</h2>
-        <p style={styles.emptyText}>请使用扩展图标中的「选取元素」功能来提取样式</p>
+        <h2 style={styles.emptyTitle}>No Results</h2>
+        <p style={styles.emptyText}>Use the "Pick Element" button in the extension popup to extract styles</p>
       </div>
     );
   }
 
   const tabs: { key: TabType; label: string }[] = [
-    { key: 'preview', label: '预览' },
+    { key: 'preview', label: 'Preview' },
     { key: 'html', label: 'HTML' },
-    { key: 'css', label: '完整 CSS' },
-    { key: 'variables', label: 'CSS 变量' },
-    { key: 'inline', label: '内联样式' },
-    { key: 'matched', label: '匹配规则' },
-    { key: 'inherited', label: '继承样式' },
-    { key: 'pseudo', label: '伪元素' },
-    { key: 'fonts', label: '字体信息' },
+    { key: 'css', label: 'Full CSS' },
+    { key: 'variables', label: 'CSS Variables' },
+    { key: 'inline', label: 'Inline Styles' },
+    { key: 'matched', label: 'Matched Rules' },
+    { key: 'inherited', label: 'Inherited' },
+    { key: 'pseudo', label: 'Pseudo Elements' },
+    { key: 'fonts', label: 'Fonts' },
   ];
 
   return (
     <div style={styles.container}>
-      {/* 头部 */}
+      {/* Header */}
       <div style={styles.header}>
         <h1 style={styles.title}>Style Extractor</h1>
-        <p style={styles.subtitle}>提取结果</p>
+        <p style={styles.subtitle}>Extraction Results</p>
       </div>
 
-      {/* 元数据 */}
+      {/* Metadata */}
       <div style={styles.metadata}>
         <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>选择器</span>
+          <span style={styles.metaLabel}>Selector</span>
           <code style={styles.metaValue}>{result.metadata.selector}</code>
         </div>
         <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>伪类状态</span>
-          <span style={styles.metaValue}>{result.metadata.pseudoStates.join(', ') || '无'}</span>
+          <span style={styles.metaLabel}>Pseudo States</span>
+          <span style={styles.metaValue}>{result.metadata.pseudoStates.join(', ') || 'None'}</span>
         </div>
         <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>伪元素</span>
-          <span style={styles.metaValue}>{result.pseudoElementCSS ? '有 (::before/::after)' : '无'}</span>
+          <span style={styles.metaLabel}>Pseudo Elements</span>
+          <span style={styles.metaValue}>{result.pseudoElementCSS ? 'Yes (::before/::after)' : 'None'}</span>
         </div>
         <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>提取时间</span>
+          <span style={styles.metaLabel}>Extracted At</span>
           <span style={styles.metaValue}>{new Date(result.metadata.timestamp).toLocaleString()}</span>
         </div>
       </div>
 
-      {/* Tab 导航 */}
+      {/* Tab Navigation */}
       <div style={styles.tabs}>
         {tabs.map(tab => (
           <button
@@ -194,14 +194,14 @@ ${result.html}
         ))}
       </div>
 
-      {/* 代码区域 */}
+      {/* Code Section */}
       <div style={styles.codeSection}>
         <div style={styles.codeHeader}>
           <span style={styles.codeTitle}>{tabs.find(t => t.key === activeTab)?.label}</span>
           {activeTab !== 'preview' && (
             <div style={styles.codeActions}>
               <button style={styles.codeBtn} onClick={() => handleCopy(getCode())}>
-                {copied ? '✓ 已复制' : '复制'}
+                {copied ? '✓ Copied' : 'Copy'}
               </button>
             </div>
           )}
@@ -210,17 +210,17 @@ ${result.html}
           <iframe
             srcDoc={getPreviewHTML()}
             style={styles.previewFrame}
-            title="样式预览"
+            title="Style Preview"
             sandbox="allow-same-origin"
           />
         ) : (
           <pre style={styles.codeContent}>
-            <code>{getCode() || '/* 暂无内容 */'}</code>
+            <code>{getCode() || '/* No content */'}</code>
           </pre>
         )}
       </div>
 
-      {/* 操作按钮 */}
+      {/* Action Buttons */}
       <div style={styles.actions}>
         <button style={styles.downloadBtn} onClick={handleDownload}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -228,10 +228,10 @@ ${result.html}
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          下载完整 HTML 文件
+          Download HTML File
         </button>
         <button style={styles.clearBtn} onClick={handleClear}>
-          清除结果
+          Clear Results
         </button>
       </div>
     </div>

@@ -40,7 +40,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
           isSelecting = false;
 
           // 显示正在提取的提示
-          showToast('正在提取样式...', 'info');
+          showToast('Extracting styles...', 'info');
 
           // 发送选中的选择器给 background
           chrome.runtime.sendMessage({
@@ -48,16 +48,16 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
             selector,
             pseudoStates: ['hover'], // 默认提取 hover 状态
           }).then(() => {
-            showToast('样式提取完成！请查看扩展弹窗', 'success');
+            showToast('Style extraction complete! Check the extension popup', 'success');
           }).catch(err => {
             console.error('Failed to extract styles:', err);
-            showToast('提取失败: ' + (err.message || '请重试'), 'error');
+            showToast('Extraction failed: ' + (err.message || 'Please try again'), 'error');
           });
         },
         onCancel: () => {
           stopElementSelection();
           isSelecting = false;
-          showToast('已取消选择', 'info');
+          showToast('Selection cancelled', 'info');
         },
       });
 

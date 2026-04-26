@@ -126,7 +126,7 @@ function updateToolbarForSelection(): void {
   const stepIndicator = document.createElement("div");
   stepIndicator.innerHTML = `
     <span style="color:${theme.textSecondary};font-size:10px;margin-right:8px;">STEP 1/2</span>
-    <span style="color:${theme.text};font-size:12px;font-weight:500;">选择元素</span>
+    <span style="color:${theme.text};font-size:12px;font-weight:500;">Select Element</span>
   `;
   setStyle(stepIndicator, {
     display: "flex",
@@ -148,7 +148,7 @@ function updateToolbarForSelection(): void {
 
   // 提示文字
   const msg = document.createElement("span");
-  msg.textContent = "点击页面元素选择，ESC 取消";
+  msg.textContent = "Click an element to select, ESC to cancel";
   setStyle(msg, {
     flexGrow: "1",
     textAlign: "left",
@@ -161,7 +161,7 @@ function updateToolbarForSelection(): void {
 
   // 取消按钮
   const cancelBtn = document.createElement("button");
-  cancelBtn.textContent = "取消";
+  cancelBtn.textContent = "Cancel";
   setStyle(cancelBtn, {
     display: "inline-flex",
     alignItems: "center",
@@ -416,7 +416,7 @@ function createConfirmToolbar(): void {
   const stepIndicator = document.createElement("div");
   stepIndicator.innerHTML = `
     <span style="color:${theme.textSecondary};font-size:10px;margin-right:8px;">STEP 2/2</span>
-    <span style="color:${theme.brand};font-size:12px;font-weight:500;">已选中</span>
+    <span style="color:${theme.brand};font-size:12px;font-weight:500;">Selected</span>
   `;
   setStyle(stepIndicator, {
     display: "flex",
@@ -438,7 +438,7 @@ function createConfirmToolbar(): void {
   children.push(createDivider());
 
   // 2. 提取按钮（蓝色主按钮）
-  const extractBtn = createIconButton("icon.24.check", "提取", () => {
+  const extractBtn = createIconButton("icon.24.check", "Extract", () => {
     if (selectedElement && currentSelector && onSelectCallback) {
       const element = selectedElement;
       const selector = currentSelector;

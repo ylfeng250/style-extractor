@@ -144,7 +144,7 @@ export function createIconButton(iconName: string, label: string, onClick: () =>
 export function createCloseButton(onClick: () => void): HTMLElement {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.setAttribute('aria-label', '关闭');
+  btn.setAttribute('aria-label', 'Close');
 
   const icon = createSVGIcon('icon.24.close.large', theme.text);
   btn.appendChild(icon);
