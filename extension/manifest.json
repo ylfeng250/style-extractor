@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Style Extractor",
   "version": "1.0.0",
-  "description": "基于 chrome.debugger 的网页样式精准提取扩展，支持选定元素的 HTML 和 CSS 精准提取",
+  "description": "Precisely extract HTML and CSS styles from web elements using Chrome Debugger API",
   "permissions": [
     "activeTab",
     "debugger",
