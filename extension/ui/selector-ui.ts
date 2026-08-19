@@ -9,7 +9,6 @@ import {
   createToolbar,
   destroyToolbar,
   createIconButton,
-  createCloseButton,
   createDivider,
   isToolbarElement,
   getToolbarElements,
@@ -20,13 +19,6 @@ import {
   highlightElement,
   getHighlightElements,
 } from "./highlight";
-import {
-  initBreadcrumb,
-  destroyBreadcrumb,
-  updateBreadcrumb,
-  hideBreadcrumb,
-  getBreadcrumbElement,
-} from "./breadcrumb";
 
 // 状态变量
 let isSelectionMode = false;
@@ -34,11 +26,15 @@ let isConfirmMode = false;
 let selectedElement: Element | null = null;
 let hoverElement: Element | null = null;
 let currentSelector: string = "";
+let selectedPseudoStates: string[] = [];
 let selectionAbortController: AbortController | null = null;
 
+const PSEUDO_OPTIONS = ["hover", "focus", "active"] as const;
+
 // 回调函数
-let onSelectCallback: ((element: Element, selector: string) => void) | null =
-  null;
+let onSelectCallback:
+  | ((element: Element, selector: string, pseudoStates: string[]) => void)
+  | null = null;
 let onCancelCallback: (() => void) | null = null;
 
 /** 设置元素样式 */
@@ -51,7 +47,7 @@ export interface SelectorUIOptions {
   /** 主题配置 */
   theme?: Partial<typeof theme>;
   /** 元素选择回调 */
-  onSelect?: (element: Element, selector: string) => void;
+  onSelect?: (element: Element, selector: string, pseudoStates: string[]) => void;
   /** 取消选择回调 */
   onCancel?: () => void;
   /** 是否显示面包屑 */
@@ -69,11 +65,9 @@ export function startElementSelection(options?: SelectorUIOptions): void {
 
   // 创建工具栏
   createToolbar();
-  const { toolbarEl, toolbarShadow } = getToolbarElements();
+  selectedPseudoStates = [];
 
-  // 初始化高亮和面包屑
   initHighlight();
-  initBreadcrumb(handleBreadcrumbClick);
 
   // 更新工具栏为选择模式
   updateToolbarForSelection();
@@ -104,13 +98,12 @@ export function stopElementSelection(): void {
 
   // 清理 UI
   destroyHighlight();
-  destroyBreadcrumb();
   destroyToolbar();
 
-  // 重置状态
   selectedElement = null;
   hoverElement = null;
   currentSelector = "";
+  selectedPseudoStates = [];
   onSelectCallback = null;
   onCancelCallback = null;
 }
@@ -198,9 +191,6 @@ function updateToolbarForSelection(): void {
 function enterConfirmMode(): void {
   isConfirmMode = true;
 
-  // 隐藏面包屑
-  hideBreadcrumb();
-
   // 隐藏 tooltip
   const { tooltipEl } = getHighlightElements();
   if (tooltipEl) {
@@ -218,7 +208,7 @@ function enterConfirmMode(): void {
 
 /** 创建元素路径选择器 */
 function createElementPathSelector(): HTMLElement {
-  const { toolbarShadow, toolbarWrapper } = getToolbarElements();
+  const { toolbarShadow } = getToolbarElements();
 
   const container = document.createElement("div");
   setStyle(container, {
@@ -398,6 +388,48 @@ function getElementPath(el: Element | null): Array<{ element: Element; label: st
   return path;
 }
 
+function createPseudoToggles(): HTMLElement {
+  const wrap = document.createElement("div");
+  setStyle(wrap, {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
+  });
+
+  for (const name of PSEUDO_OPTIONS) {
+    const active = selectedPseudoStates.includes(name);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = `:${name}`;
+    setStyle(btn, {
+      height: "24px",
+      padding: "0 6px",
+      border: `1px solid ${active ? theme.brand : theme.border}`,
+      borderRadius: theme.buttonBorderRadius,
+      background: active ? theme.brandBg : "transparent",
+      color: active ? theme.brand : theme.textSecondary,
+      fontFamily: "inherit",
+      fontSize: "11px",
+      fontWeight: "500",
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+    });
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (selectedPseudoStates.includes(name)) {
+        selectedPseudoStates = selectedPseudoStates.filter((state) => state !== name);
+      } else {
+        selectedPseudoStates = [...selectedPseudoStates, name];
+      }
+      createConfirmToolbar();
+    };
+    wrap.appendChild(btn);
+  }
+
+  return wrap;
+}
+
 /** 创建确认工具栏 */
 function createConfirmToolbar(): void {
   const { toolbarHost, toolbarWrapper, toolbarEl } = getToolbarElements();
@@ -437,14 +469,18 @@ function createConfirmToolbar(): void {
 
   children.push(createDivider());
 
-  // 2. 提取按钮（蓝色主按钮）
+  children.push(createPseudoToggles());
+
+  children.push(createDivider());
+
   const extractBtn = createIconButton("icon.24.check", "Extract", () => {
     if (selectedElement && currentSelector && onSelectCallback) {
       const element = selectedElement;
       const selector = currentSelector;
+      const pseudoStates = [...selectedPseudoStates];
       const callback = onSelectCallback;
       stopElementSelection();
-      callback(element, selector);
+      callback(element, selector, pseudoStates);
     }
   }, "primary");
   children.push(extractBtn);
@@ -518,10 +554,7 @@ function handleMouseMove(e: MouseEvent): void {
 
 /** 点击处理 */
 function handleClick(e: MouseEvent): void {
-  // 如果点击的是工具栏或面包屑，忽略
   if (isToolbarElement(e.target as Element)) return;
-  const breadcrumbEl = getBreadcrumbElement();
-  if (breadcrumbEl && breadcrumbEl.contains(e.target as Element)) return;
 
   e.preventDefault();
   e.stopPropagation();
@@ -541,33 +574,6 @@ function handleKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
     stopElementSelection();
     onCancelCallback?.();
-  }
-}
-
-/** 面包屑点击处理 */
-function handleBreadcrumbClick(depth: number): void {
-  if (depth === -1) {
-    // 提取按钮点击
-    if (selectedElement && currentSelector && onSelectCallback) {
-      stopElementSelection();
-      onSelectCallback(selectedElement, currentSelector);
-    }
-    return;
-  }
-
-  // 选择祖先元素
-  let target: Element | null = selectedElement || hoverElement;
-  let currentDepth = 0;
-  while (target && currentDepth < depth) {
-    target = target.parentElement;
-    if (!target || target === document.body) break;
-    currentDepth++;
-  }
-
-  if (target) {
-    selectedElement = target;
-    currentSelector = generateSelector(target);
-    highlightElement(target);
   }
 }
 
@@ -624,43 +630,6 @@ function generateSelector(el: Element): string {
   }
 
   return path.join(" > ");
-}
-
-/** 显示提示 Toast */
-function showToast(message: string): void {
-  const toast = document.createElement("div");
-  setStyle(toast, {
-    position: "fixed",
-    bottom: "20px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: theme.brand,
-    color: theme.textOnBrand,
-    padding: "10px 20px",
-    borderRadius: "8px",
-    fontSize: "14px",
-    fontFamily: theme.fontFamily,
-    fontWeight: "500",
-    zIndex: "2147483647",
-    boxShadow: theme.shadow,
-    animation: "pop .3s ease-out",
-  });
-  toast.textContent = message;
-
-  // 添加动画样式
-  const style = document.createElement("style");
-  style.textContent = `
-    @keyframes pop { from { opacity: 0; transform: translateX(-50%) scale(0.8); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
-    @keyframes fade { to { opacity: 0; transform: translateX(-50%) scale(0.8); } }
-  `;
-  toast.appendChild(style);
-
-  document.body.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.animation = "fade .3s ease-out forwards";
-    setTimeout(() => toast.remove(), 300);
-  }, 2000);
 }
 
 // 导出状态查询函数

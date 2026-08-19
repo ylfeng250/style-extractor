@@ -3,26 +3,31 @@
  * 负责元素选择、高亮和与后台通信
  */
 
-// 复用现有的 UI 组件
 import {
   startElementSelection,
   stopElementSelection,
 } from '../ui/selector-ui';
+import {
+  hideExtractLoading,
+  showExtractLoading,
+  updateExtractLoading,
+} from '../ui/loading-overlay';
+import {
+  createExtractId,
+  markElement,
+  unmarkElement,
+} from '../utils/extract-marker';
+import { pruneCssAgainstHtml } from '../utils/css-filter';
 
-// 当前选择状态
 let isSelecting = false;
 
-/**
- * 消息类型定义
- */
 interface Message {
   type: string;
+  message?: string;
+  ratio?: number;
   [key: string]: unknown;
 }
 
-/**
- * 监听来自 popup 和 background 的消息
- */
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   const { type } = message;
 
@@ -34,29 +39,34 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
       }
 
       startElementSelection({
-        onSelect: (_element, selector) => {
-          // 立即停止选择模式
+        onSelect: (element, selector, pseudoStates) => {
           stopElementSelection();
           isSelecting = false;
 
-          // 显示正在提取的提示
-          showToast('Extracting styles...', 'info');
+          const extractId = createExtractId();
+          markElement(element, extractId);
+          showExtractLoading('Connecting to page…');
 
-          // 发送选中的选择器给 background
           chrome.runtime.sendMessage({
             type: 'ELEMENT_SELECTED',
             selector,
-            pseudoStates: ['hover'], // 默认提取 hover 状态
+            extractId,
+            pseudoStates,
           }).then(() => {
-            showToast('Style extraction complete! Check the extension popup', 'success');
+            updateExtractLoading('Opening results…', 1);
+            window.setTimeout(() => hideExtractLoading(), 240);
           }).catch(err => {
+            hideExtractLoading();
             console.error('Failed to extract styles:', err);
-            showToast('Extraction failed: ' + (err.message || 'Please try again'), 'error');
+            showToast('Extraction failed: ' + (err instanceof Error ? err.message : 'Please try again'), 'error');
+          }).finally(() => {
+            unmarkElement(element);
           });
         },
         onCancel: () => {
           stopElementSelection();
           isSelecting = false;
+          hideExtractLoading();
           showToast('Selection cancelled', 'info');
         },
       });
@@ -71,6 +81,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
         stopElementSelection();
         isSelecting = false;
       }
+      hideExtractLoading();
       sendResponse({ status: 'stopped' });
       return false;
     }
@@ -79,16 +90,31 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
       sendResponse({ isSelecting });
       return false;
     }
+
+    case 'EXTRACT_PROGRESS': {
+      updateExtractLoading(
+        typeof message.message === 'string' ? message.message : 'Extracting styles…',
+        typeof message.ratio === 'number' ? message.ratio : undefined
+      );
+      return false;
+    }
+
+    case 'PRUNE_CSS': {
+      const html = typeof message.html === 'string' ? message.html : '';
+      const css = typeof message.css === 'string' ? message.css : '';
+      try {
+        sendResponse({ css: pruneCssAgainstHtml(html, css) });
+      } catch (err) {
+        console.warn('Failed to prune CSS:', err);
+        sendResponse({ css });
+      }
+      return false;
+    }
   }
 
   return false;
 });
 
-console.log('[Style Extractor] Content script loaded');
-
-/**
- * 显示 Toast 提示
- */
 function showToast(message: string, type: 'info' | 'success' | 'error' = 'info'): void {
   const toast = document.createElement('div');
   const bgColor = type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#1a1a1a';
@@ -113,12 +139,15 @@ function showToast(message: string, type: 'info' | 'success' | 'error' = 'info')
     animation: slideUp 0.3s ease-out;
   `;
 
-  toast.innerHTML = `
-    <span style="font-size:16px;">${icon}</span>
-    <span>${message}</span>
-  `;
+  const iconEl = document.createElement('span');
+  iconEl.style.fontSize = '16px';
+  iconEl.textContent = icon;
 
-  // 添加动画样式
+  const textEl = document.createElement('span');
+  textEl.textContent = message;
+
+  toast.append(iconEl, textEl);
+
   const style = document.createElement('style');
   style.textContent = `
     @keyframes slideUp {
@@ -133,7 +162,6 @@ function showToast(message: string, type: 'info' | 'success' | 'error' = 'info')
 
   document.body.appendChild(toast);
 
-  // 3秒后自动移除
   setTimeout(() => {
     toast.style.animation = 'fadeOut 0.3s ease-out forwards';
     setTimeout(() => toast.remove(), 300);

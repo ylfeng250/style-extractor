@@ -7,10 +7,10 @@ A Chrome extension for precise HTML and CSS extraction using Chrome Debugger API
 ## Features
 
 - **Precise Element Selection** - Visual element picker with real-time highlighting, navigate parent/child elements easily
-- **Comprehensive Style Extraction** - Extract matched CSS rules, inline styles, and inherited styles
+- **Comprehensive Style Extraction** - Extract matched CSS rules for the selected element and its descendants, plus inline and inherited styles
 - **Pseudo-element Support** - Automatically extracts `::before`, `::after`, and other pseudo-element styles
 - **Font Information** - Get actual rendered font information
-- **Pseudo-class Activation** - Force activate `:hover`, `:active`, `:focus` states
+- **Pseudo-class Activation** - Optionally force `:hover`, `:active`, or `:focus` before extracting
 - **One-click Copy** - Copy HTML/CSS code to clipboard
 - **Export & Download** - Generate complete HTML files for download
 
@@ -22,8 +22,11 @@ A Chrome extension for precise HTML and CSS extraction using Chrome Debugger API
 # Install dependencies
 npm install
 
-# Development build (with watch mode)
+# Development build (rebuilds on file changes)
 npm run dev
+
+# Typecheck
+npm run typecheck
 
 # Production build
 npm run build
@@ -51,7 +54,7 @@ npm run build
 1. Move mouse over the page to preview highlighted elements
 2. Click on your target element
 3. Use the element path selector to navigate ancestors if needed
-4. Toolbar shows current selector path
+4. Optionally toggle `:hover`, `:focus`, or `:active` before extracting
 
 ### Step 3: Extract Styles
 
@@ -77,13 +80,13 @@ The Options page opens automatically showing:
 | Control | Action |
 |---------|--------|
 | Element Path Selector | Click to expand ancestor list, select any parent |
+| :hover / :focus / :active | Force pseudo-class states for this extraction |
 | ✓ Extract | Confirm and extract styles |
 | ✕ Cancel | Return to selection mode (ESC) |
-| ↑ Parent | Navigate to parent element |
 
 ## Keyboard Shortcuts
 
-- `ESC` - Cancel selection mode
+- `ESC` - Cancel selection or return to picking
 
 ## Technical Stack
 

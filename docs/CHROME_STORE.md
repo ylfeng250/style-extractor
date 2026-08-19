@@ -16,7 +16,7 @@ Precisely extract HTML and CSS styles from web elements. Supports CSS variables,
 - **Complete Style Extraction** - Extract matched CSS rules, inline styles, and inherited styles
 - **CSS Variable Support** - Automatically identify and extract related CSS custom properties (variables)
 - **Pseudo-element Styles** - Automatically extract ::before, ::after, and other pseudo-element styles
-- **Pseudo-class States** - Force activate :hover, :active, :focus states
+- **Pseudo-class States** - Optionally force :hover, :active, :focus before extracting
 - **Font Information** - Get the list of fonts actually rendered for the element
 - **Live Preview** - Instantly preview extracted styles in the extension
 - **One-click Copy/Download** - Support HTML/CSS code copying, generate complete HTML file for download
