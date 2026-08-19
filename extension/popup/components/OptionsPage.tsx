@@ -1,25 +1,57 @@
 /**
- * Options 页面 - 显示提取结果
+ * Options 页面 - 提取结果工作台
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import type { StyleExtractionResult } from '../../utils/style-assembler';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { generateFullHTML, type StyleExtractionResult } from '../../utils/style-assembler';
 
-type TabType = 'preview' | 'html' | 'css' | 'variables' | 'inline' | 'matched' | 'inherited' | 'pseudo' | 'fonts';
+type CodeTab = 'html' | 'css' | 'variables' | 'inline' | 'matched' | 'inherited' | 'pseudo' | 'fonts';
+type PreviewWidth = 'fluid' | 'tablet' | 'phone';
+type CopiedKey = 'html' | 'css' | 'snippet' | 'section' | null;
+
+interface ExtractProgress {
+  message: string;
+  ratio: number;
+}
+
+const PREVIEW_WIDTH: Record<PreviewWidth, string> = {
+  fluid: '100%',
+  tablet: '768px',
+  phone: '390px',
+};
+
+function hasContent(text: string | undefined): boolean {
+  return Boolean(text && text.replace(/\/\*[\s\S]*?\*\//g, '').trim());
+}
 
 export const OptionsPage: React.FC = () => {
   const [result, setResult] = useState<StyleExtractionResult | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>('html');
-  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ExtractProgress | null>(null);
+  const [codeTab, setCodeTab] = useState<CodeTab>('css');
+  const [previewWidth, setPreviewWidth] = useState<PreviewWidth>('fluid');
+  const [copied, setCopied] = useState<CopiedKey>(null);
 
   useEffect(() => {
-    // Load result
     loadResult();
 
-    // Listen for updates
-    const handleMessage = (message: { type: string }) => {
+    const handleMessage = (message: { type: string; error?: string; message?: string; ratio?: number }) => {
+      if (message.type === 'EXTRACT_PROGRESS') {
+        setError(null);
+        setResult(null);
+        setProgress({
+          message: message.message || 'Extracting styles…',
+          ratio: typeof message.ratio === 'number' ? message.ratio : 0.1,
+        });
+      }
       if (message.type === 'EXTRACT_COMPLETE') {
+        setProgress(null);
+        setError(null);
         loadResult();
+      }
+      if (message.type === 'EXTRACT_ERROR') {
+        setProgress(null);
+        setError(message.error || 'Extraction failed');
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -28,18 +60,32 @@ export const OptionsPage: React.FC = () => {
 
   const loadResult = async () => {
     try {
-      const data = await chrome.storage.local.get('extractResult');
+      const data = await chrome.storage.local.get(['extractResult', 'extractError', 'extractProgress']);
       setResult(data.extractResult || null);
+      setError(typeof data.extractError === 'string' ? data.extractError : null);
+      setProgress(
+        data.extractProgress && typeof data.extractProgress.message === 'string'
+          ? {
+              message: data.extractProgress.message,
+              ratio: typeof data.extractProgress.ratio === 'number' ? data.extractProgress.ratio : 0.1,
+            }
+          : null
+      );
     } catch (err) {
       console.error('Failed to load result:', err);
     }
   };
 
-  const handleCopy = useCallback(async (text: string) => {
+  const flashCopied = (key: CopiedKey) => {
+    setCopied(key);
+    window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1600);
+  };
+
+  const copyText = useCallback(async (text: string, key: CopiedKey) => {
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      flashCopied(key);
     } catch (err) {
       console.error('Copy failed:', err);
     }
@@ -48,31 +94,14 @@ export const OptionsPage: React.FC = () => {
   const handleDownload = useCallback(async () => {
     if (!result) return;
 
-    const fullHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Extracted Style - ${result.metadata.selector}</title>
-  <style>
-/* Reset */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; background: #f5f5f5; }
-
-/* Extracted styles */
-${result.css}
-  </style>
-</head>
-<body>
-${result.html}
-</body>
-</html>`;
-
+    const fullHTML = generateFullHTML(
+      result.html,
+      result.css,
+      `Extracted Style - ${result.metadata.selector}`
+    );
     const blob = new Blob([fullHTML], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const filename = `extracted-${result.metadata.selector.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`;
-
-    // Create download link
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -83,324 +112,205 @@ ${result.html}
   }, [result]);
 
   const handleClear = useCallback(async () => {
-    await chrome.storage.local.remove('extractResult');
+    await chrome.storage.local.remove(['extractResult', 'extractError', 'extractProgress']);
     setResult(null);
+    setError(null);
+    setProgress(null);
   }, []);
 
-  const getCode = (): string => {
-    if (!result) return '';
-    switch (activeTab) {
-      case 'preview': return '';
-      case 'html': return result.html;
-      case 'css': return result.css;
-      case 'variables': return result.cssVariables;
-      case 'inline': return result.inlineCSS;
-      case 'matched': return result.matchedCSS;
-      case 'inherited': return result.inheritedCSS;
-      case 'pseudo': return result.pseudoElementCSS;
-      case 'fonts': return result.fontInfo;
-      default: return '';
-    }
-  };
+  const sections = useMemo(() => {
+    if (!result) return [];
+    return [
+      { key: 'html' as const, label: 'HTML', code: result.html },
+      { key: 'css' as const, label: 'CSS', code: result.css },
+      { key: 'variables' as const, label: 'Variables', code: result.cssVariables },
+      { key: 'inline' as const, label: 'Inline', code: result.inlineCSS },
+      { key: 'matched' as const, label: 'Matched', code: result.matchedCSS },
+      { key: 'inherited' as const, label: 'Inherited', code: result.inheritedCSS },
+      { key: 'pseudo' as const, label: 'Pseudo', code: result.pseudoElementCSS },
+      { key: 'fonts' as const, label: 'Fonts', code: result.fontInfo },
+    ];
+  }, [result]);
 
-  const getPreviewHTML = (): string => {
-    if (!result) return '';
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; background: #f5f5f5; min-height: 100vh; }
-    ${result.css}
-  </style>
-</head>
-<body>
-${result.html}
-</body>
-</html>`;
-  };
+  const activeSection = sections.find((section) => section.key === codeTab);
+  const previewHTML = result
+    ? generateFullHTML(result.html, result.css, result.metadata.selector)
+    : '';
+  const snippet = result ? `${result.html}\n\n<style>\n${result.css}\n</style>` : '';
 
-  if (!result) {
+  if (progress && !result) {
+    const width = `${Math.max(8, Math.min(100, Math.round(progress.ratio * 100)))}%`;
     return (
-      <div style={styles.empty}>
-        <div style={styles.emptyIcon}>
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M9 3v18" />
-            <path d="M15 9l-3-3-3 3" />
-          </svg>
+      <div className="empty">
+        <div className="loading-card">
+          <div className="loading-row">
+            <div className="spinner" />
+            <div>
+              <p className="loading-title">Extracting styles</p>
+              <p className="loading-message">{progress.message}</p>
+            </div>
+          </div>
+          <div className="loading-track">
+            <div className="loading-bar" style={{ width }} />
+          </div>
         </div>
-        <h2 style={styles.emptyTitle}>No Results</h2>
-        <p style={styles.emptyText}>Use the "Pick Element" button in the extension popup to extract styles</p>
       </div>
     );
   }
 
-  const tabs: { key: TabType; label: string }[] = [
-    { key: 'preview', label: 'Preview' },
-    { key: 'html', label: 'HTML' },
-    { key: 'css', label: 'Full CSS' },
-    { key: 'variables', label: 'CSS Variables' },
-    { key: 'inline', label: 'Inline Styles' },
-    { key: 'matched', label: 'Matched Rules' },
-    { key: 'inherited', label: 'Inherited' },
-    { key: 'pseudo', label: 'Pseudo Elements' },
-    { key: 'fonts', label: 'Fonts' },
-  ];
+  if (!result && error) {
+    return (
+      <div className="empty is-error">
+        <div className="empty-card">
+          <div className="empty-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <h1>Extraction failed</h1>
+          <p>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="empty">
+        <div className="empty-card">
+          <div className="empty-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+              <path d="M13 13l6 6" />
+            </svg>
+          </div>
+          <h1>No extraction yet</h1>
+          <p>Open the extension popup and click Pick Element to capture HTML and CSS from a page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const extractedAt = new Date(result.metadata.timestamp).toLocaleString();
+  const descendantCount = result.metadata.descendantCount ?? 0;
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <h1 style={styles.title}>Style Extractor</h1>
-        <p style={styles.subtitle}>Extraction Results</p>
-      </div>
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+              <path d="M13 13l6 6" />
+            </svg>
+          </div>
+          <span className="brand-name">Style Extractor</span>
+        </div>
 
-      {/* Metadata */}
-      <div style={styles.metadata}>
-        <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>Selector</span>
-          <code style={styles.metaValue}>{result.metadata.selector}</code>
-        </div>
-        <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>Pseudo States</span>
-          <span style={styles.metaValue}>{result.metadata.pseudoStates.join(', ') || 'None'}</span>
-        </div>
-        <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>Pseudo Elements</span>
-          <span style={styles.metaValue}>{result.pseudoElementCSS ? 'Yes (::before/::after)' : 'None'}</span>
-        </div>
-        <div style={styles.metaItem}>
-          <span style={styles.metaLabel}>Extracted At</span>
-          <span style={styles.metaValue}>{new Date(result.metadata.timestamp).toLocaleString()}</span>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div style={styles.tabs}>
-        {tabs.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              ...styles.tab,
-              ...(activeTab === tab.key ? styles.tabActive : {}),
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Code Section */}
-      <div style={styles.codeSection}>
-        <div style={styles.codeHeader}>
-          <span style={styles.codeTitle}>{tabs.find(t => t.key === activeTab)?.label}</span>
-          {activeTab !== 'preview' && (
-            <div style={styles.codeActions}>
-              <button style={styles.codeBtn} onClick={() => handleCopy(getCode())}>
-                {copied ? '✓ Copied' : 'Copy'}
-              </button>
-            </div>
+        <div className="meta">
+          <code className="chip" title={result.metadata.selector}>{result.metadata.selector}</code>
+          {result.metadata.pseudoStates.length > 0 && (
+            <span className="pill">{result.metadata.pseudoStates.map((state) => `:${state}`).join(' ')}</span>
           )}
+          {descendantCount > 0 && (
+            <span className="pill">{descendantCount} descendants</span>
+          )}
+          <span className="pill">{extractedAt}</span>
         </div>
-        {activeTab === 'preview' ? (
-          <iframe
-            srcDoc={getPreviewHTML()}
-            style={styles.previewFrame}
-            title="Style Preview"
-            sandbox="allow-same-origin"
-          />
-        ) : (
-          <pre style={styles.codeContent}>
-            <code>{getCode() || '/* No content */'}</code>
-          </pre>
-        )}
-      </div>
 
-      {/* Action Buttons */}
-      <div style={styles.actions}>
-        <button style={styles.downloadBtn} onClick={handleDownload}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download HTML File
-        </button>
-        <button style={styles.clearBtn} onClick={handleClear}>
-          Clear Results
-        </button>
-      </div>
+        <div className="top-actions">
+          <button className="btn" onClick={() => copyText(result.html, 'html')}>
+            {copied === 'html' ? 'Copied HTML' : 'Copy HTML'}
+          </button>
+          <button className="btn" onClick={() => copyText(result.css, 'css')}>
+            {copied === 'css' ? 'Copied CSS' : 'Copy CSS'}
+          </button>
+          <button className="btn" onClick={() => copyText(snippet, 'snippet')}>
+            {copied === 'snippet' ? 'Copied snippet' : 'Copy snippet'}
+          </button>
+          <button className="btn btn-primary" onClick={handleDownload}>
+            Download
+          </button>
+          <button className="btn btn-ghost" onClick={handleClear}>
+            Clear
+          </button>
+        </div>
+      </header>
+
+      <main className="workspace">
+        <section className="pane">
+          <div className="pane-bar">
+            <span className="pane-title">Preview</span>
+            <div className="segment" role="group" aria-label="Preview width">
+              {([
+                ['fluid', 'Full'],
+                ['tablet', '768'],
+                ['phone', '390'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={previewWidth === key}
+                  onClick={() => setPreviewWidth(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="preview-stage">
+            <div className="preview-frame-wrap" style={{ width: PREVIEW_WIDTH[previewWidth] }}>
+              <iframe
+                srcDoc={previewHTML}
+                title="Style preview"
+                sandbox=""
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="pane">
+          <div className="pane-bar">
+            <span className="pane-title">Source</span>
+          </div>
+          <div className="code-layout">
+            <nav className="section-list" aria-label="Extracted sections">
+              {sections.map((section) => {
+                const empty = !hasContent(section.code);
+                return (
+                  <button
+                    key={section.key}
+                    type="button"
+                    className={empty ? 'is-empty' : undefined}
+                    aria-current={codeTab === section.key}
+                    onClick={() => setCodeTab(section.key)}
+                  >
+                    <span>{section.label}</span>
+                    {!empty && <span className="count">has data</span>}
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="code-main">
+              <div className="code-toolbar">
+                <span className="code-label">{activeSection?.label}</span>
+                <button
+                  className="btn"
+                  disabled={!hasContent(activeSection?.code)}
+                  onClick={() => copyText(activeSection?.code || '', 'section')}
+                >
+                  {copied === 'section' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <pre className="code-view">
+                <code>{activeSection?.code || '/* No content */'}</code>
+              </pre>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    maxWidth: '1000px',
-    margin: '0 auto',
-    padding: '24px',
-  },
-  header: {
-    marginBottom: '24px',
-  },
-  title: {
-    fontSize: '28px',
-    fontWeight: 700,
-    color: '#1a1a1a',
-    marginBottom: '8px',
-  },
-  subtitle: {
-    fontSize: '16px',
-    color: '#666',
-  },
-  metadata: {
-    background: '#fff',
-    border: '1px solid #e5e5e5',
-    borderRadius: '8px',
-    padding: '16px',
-    marginBottom: '24px',
-    display: 'flex',
-    gap: '24px',
-    flexWrap: 'wrap',
-  },
-  metaItem: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '4px',
-  },
-  metaLabel: {
-    fontSize: '12px',
-    color: '#666',
-    fontWeight: 500,
-  },
-  metaValue: {
-    fontSize: '14px',
-    color: '#333',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '16px',
-    borderBottom: '1px solid #e5e5e5',
-    paddingBottom: '12px',
-  },
-  tab: {
-    padding: '8px 16px',
-    fontSize: '14px',
-    fontWeight: 500,
-    color: '#666',
-    background: 'transparent',
-    border: '1px solid transparent',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  tabActive: {
-    color: '#0d99ff',
-    background: '#e0f2fe',
-    borderColor: '#bae6fd',
-  },
-  codeSection: {
-    background: '#1e1e1e',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    marginBottom: '24px',
-  },
-  previewFrame: {
-    width: '100%',
-    height: '400px',
-    border: 'none',
-    background: '#fff',
-  },
-  codeHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px 16px',
-    background: '#2d2d2d',
-    borderBottom: '1px solid #3d3d3d',
-  },
-  codeTitle: {
-    color: '#fff',
-    fontSize: '14px',
-    fontWeight: 600,
-  },
-  codeActions: {
-    display: 'flex',
-    gap: '8px',
-  },
-  codeBtn: {
-    padding: '6px 12px',
-    fontSize: '12px',
-    color: '#fff',
-    background: '#3d3d3d',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-  },
-  codeContent: {
-    padding: '16px',
-    margin: 0,
-    overflow: 'auto',
-    maxHeight: '500px',
-    fontSize: '13px',
-    fontFamily: 'Consolas, Monaco, monospace',
-    lineHeight: 1.5,
-    color: '#d4d4d4',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  actions: {
-    display: 'flex',
-    gap: '12px',
-  },
-  downloadBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '12px 24px',
-    fontSize: '14px',
-    fontWeight: 600,
-    color: '#fff',
-    background: '#0d99ff',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-  },
-  clearBtn: {
-    padding: '12px 24px',
-    fontSize: '14px',
-    fontWeight: 500,
-    color: '#666',
-    background: '#fff',
-    border: '1px solid #e5e5e5',
-    borderRadius: '8px',
-    cursor: 'pointer',
-  },
-  empty: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '60vh',
-    textAlign: 'center' as const,
-  },
-  emptyIcon: {
-    color: '#ccc',
-    marginBottom: '16px',
-  },
-  emptyTitle: {
-    fontSize: '24px',
-    fontWeight: 600,
-    color: '#333',
-    marginBottom: '8px',
-  },
-  emptyText: {
-    fontSize: '14px',
-    color: '#666',
-  },
 };

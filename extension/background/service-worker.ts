@@ -4,10 +4,19 @@
  */
 
 import { createCDPClient } from '../utils/cdp-client';
+import { collectHtmlTokens, filterStylesheet } from '../utils/css-filter';
+import { extractMarkerSelector, stripExtractMarker } from '../utils/extract-marker';
 import {
   assembleStyles,
+  collectStyleSheetIds,
+  mergeDescendantStyles,
   type StyleExtractionResult
 } from '../utils/style-assembler';
+import type { MatchedStylesForNode } from '../utils/cdp-client';
+
+const MAX_DESCENDANTS = 400;
+const DESCENDANT_CONCURRENCY = 12;
+const DESCENDANT_SELECTOR = '[class], button, a, img, svg, [role]';
 
 // 当前活动的标签页 ID
 let activeTabId: number | null = null;
@@ -18,6 +27,7 @@ let activeTabId: number | null = null;
 interface Message {
   type: string;
   selector?: string;
+  extractId?: string;
   tabId?: number;
   pseudoStates?: string[];
 }
@@ -30,24 +40,24 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
   switch (type) {
     case 'ELEMENT_SELECTED': {
-      const { selector, pseudoStates } = message;
+      const { selector, extractId, pseudoStates } = message;
       const tabId = sender.tab?.id;
-      if (tabId && selector) {
-        handleElementSelected(selector, tabId, pseudoStates || ['hover'])
+      if (tabId && (extractId || selector)) {
+        handleElementSelected(selector || '', tabId, pseudoStates || [], extractId)
           .then(() => sendResponse({ success: true }))
           .catch(err => {
             console.error('Extraction failed:', err);
             sendResponse({ success: false, error: err.message });
           });
-        return true; // 异步响应
+        return true;
       }
       break;
     }
 
     case 'EXTRACT_REQUEST': {
-      const { selector, tabId, pseudoStates } = message;
-      if (selector && tabId) {
-        handleElementSelected(selector, tabId, pseudoStates || ['hover'])
+      const { selector, extractId, tabId, pseudoStates } = message;
+      if (tabId && (extractId || selector)) {
+        handleElementSelected(selector || '', tabId, pseudoStates || [], extractId)
           .then(() => sendResponse({ success: true }))
           .catch(err => {
             console.error('Extraction failed:', err);
@@ -66,7 +76,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
     }
 
     case 'CLEAR_RESULT': {
-      chrome.storage.local.remove('extractResult')
+      chrome.storage.local.remove(['extractResult', 'extractError', 'extractProgress'])
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ error: err.message }));
       return true;
@@ -82,18 +92,25 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 async function handleElementSelected(
   selector: string,
   tabId: number,
-  pseudoStates: string[]
+  pseudoStates: string[],
+  extractId?: string
 ): Promise<void> {
   activeTabId = tabId;
   const client = createCDPClient(tabId);
   let nodeId: number | null = null;
 
   try {
-    // 1. Attach debugger
-    await client.attach();
+    await chrome.storage.local.remove(['extractResult', 'extractError']);
+    await reportProgress(tabId, 'Connecting to page…', 0.06);
+    try {
+      await chrome.runtime.openOptionsPage();
+    } catch (e) {
+      console.log('Could not open options page:', e);
+    }
 
-    // 2. Wait briefly for DOM to stabilize, then query node ID
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await client.attach();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await reportProgress(tabId, 'Locating selected element…', 0.14);
 
     // 3. Get document root node, then query from root
     const documentNodeId = await client.getDocument();
@@ -101,10 +118,11 @@ async function handleElementSelected(
       throw new Error('Unable to get document root node');
     }
 
-    // 4. Query node ID (with retry)
+    const lookupSelector = extractId ? extractMarkerSelector(extractId) : selector;
+
     let retries = 3;
     while (retries > 0) {
-      nodeId = await client.querySelector(selector, documentNodeId);
+      nodeId = await client.querySelector(lookupSelector, documentNodeId);
       if (nodeId) break;
       retries--;
       if (retries > 0) {
@@ -112,8 +130,12 @@ async function handleElementSelected(
       }
     }
 
+    if (!nodeId && extractId && selector) {
+      nodeId = await client.querySelector(selector, documentNodeId);
+    }
+
     if (!nodeId) {
-      throw new Error(`Unable to locate element: ${selector}. Please try re-selecting.`);
+      throw new Error(`Unable to locate element: ${selector || lookupSelector}. Please try re-selecting.`);
     }
 
     // 5. Force pseudo-class states
@@ -129,10 +151,52 @@ async function handleElementSelected(
       // 继续执行，不强制退出
     }
 
-    // 6. Get matched styles
-    const stylesData = await client.getMatchedStylesForNode(nodeId);
+    await reportProgress(tabId, 'Reading HTML…', 0.22);
+    const outerHTML = stripExtractMarker(await client.getOuterHTML(nodeId));
 
-    // 7. Get html element styles (for extracting CSS variables from :root)
+    const rootMatched = await client.getMatchedStylesForNode(nodeId);
+
+    let descendantIds: number[] = [];
+    try {
+      descendantIds = uniqueIds(
+        await client.querySelectorAll(DESCENDANT_SELECTOR, nodeId)
+      ).slice(0, MAX_DESCENDANTS);
+    } catch (err) {
+      console.warn('Failed to list descendant nodes:', err);
+    }
+
+    await reportProgress(tabId, `Collecting descendant styles (0/${descendantIds.length})…`, 0.28);
+
+    let completed = 0;
+    const descendantStyles = await mapPool(
+      descendantIds,
+      DESCENDANT_CONCURRENCY,
+      async (id) => {
+        try {
+          const styles = await client.getMatchedStylesForNode(id);
+          completed += 1;
+          if (completed === descendantIds.length || completed % 20 === 0) {
+            const ratio = 0.28 + (completed / Math.max(descendantIds.length, 1)) * 0.4;
+            await reportProgress(
+              tabId,
+              `Collecting descendant styles (${completed}/${descendantIds.length})…`,
+              ratio
+            );
+          }
+          return styles;
+        } catch (err) {
+          console.warn(`Failed to get styles for descendant ${id}:`, err);
+          completed += 1;
+          return null;
+        }
+      }
+    );
+
+    const stylesData = mergeDescendantStyles(
+      rootMatched,
+      descendantStyles.filter((styles): styles is MatchedStylesForNode => styles !== null)
+    );
+
     let rootStyles = null;
     try {
       const htmlNodeId = await client.querySelector('html', documentNodeId);
@@ -143,79 +207,35 @@ async function handleElementSelected(
       console.warn('Failed to get html styles:', err);
     }
 
-    // 8. Collect all related stylesheet IDs
     const styleSheetIds = new Set<string>();
-
-    // 从匹配规则中收集
-    if (stylesData.matchedCSSRules) {
-      for (const rule of stylesData.matchedCSSRules) {
-        if (rule.rule.styleSheetId) {
-          styleSheetIds.add(rule.rule.styleSheetId);
-        }
-      }
+    collectStyleSheetIds(stylesData, styleSheetIds);
+    if (rootStyles) {
+      collectStyleSheetIds(rootStyles, styleSheetIds);
     }
 
-    // 从 rootStyles 中收集
-    if (rootStyles?.matchedCSSRules) {
-      for (const rule of rootStyles.matchedCSSRules) {
-        if (rule.rule.styleSheetId) {
-          styleSheetIds.add(rule.rule.styleSheetId);
-        }
-      }
-    }
+    await reportProgress(tabId, 'Filtering matching stylesheet rules…', 0.78);
 
-    // 从继承样式中收集
-    if (stylesData.inherited) {
-      for (const inherited of stylesData.inherited) {
-        if (inherited.matchedCSSRules) {
-          for (const rule of inherited.matchedCSSRules) {
-            if (rule.rule.styleSheetId) {
-              styleSheetIds.add(rule.rule.styleSheetId);
-            }
-          }
-        }
-      }
-    }
-
-    // 从伪元素中收集
-    if (stylesData.pseudoElements) {
-      for (const pseudoEl of stylesData.pseudoElements as Array<{
-        matches?: Array<{ rule: { styleSheetId?: string } }>;
-      }>) {
-        if (pseudoEl.matches) {
-          for (const rule of pseudoEl.matches) {
-            if (rule.rule.styleSheetId) {
-              styleSheetIds.add(rule.rule.styleSheetId);
-            }
-          }
-        }
-      }
-    }
-
-    // 9. Get all stylesheet texts, extract CSS variable definitions
-    const allStylesheetTexts: string[] = [];
     const allCSSVariableDefinitions = new Map<string, string>();
+    const tokens = collectHtmlTokens(outerHTML);
+    const relevantSheets: string[] = [];
 
     for (const styleSheetId of styleSheetIds) {
       try {
         const text = await client.getStyleSheetText(styleSheetId);
         if (text) {
-          allStylesheetTexts.push(text);
-          // 从样式表文本中提取所有 CSS 变量定义
           extractAllCSSVariables(text, allCSSVariableDefinitions);
+          const filtered = filterStylesheet(text, tokens);
+          if (filtered) relevantSheets.push(filtered);
         }
       } catch (err) {
         console.warn(`Failed to fetch stylesheet ${styleSheetId}:`, err);
       }
     }
 
-    // 10. Get font information
+    await reportProgress(tabId, 'Assembling CSS…', 0.9);
+
     const fonts = await client.getPlatformFontsForNode(nodeId);
 
-    // 11. Get element HTML
-    const outerHTML = await client.getOuterHTML(nodeId);
-
-    // 12. Get computed styles (for Strategy D: replacing unresolved CSS variables)
     let computedStyles: Record<string, string> | undefined;
     try {
       computedStyles = await client.getComputedStyleForNode(nodeId);
@@ -223,7 +243,6 @@ async function handleElementSelected(
       console.warn('Failed to get computed styles:', err);
     }
 
-    // 13. Assemble styles, passing all CSS variable definitions
     const assembled = assembleStyles(
       stylesData,
       fonts,
@@ -231,60 +250,78 @@ async function handleElementSelected(
       pseudoStates,
       rootStyles || undefined,
       computedStyles,
-      allCSSVariableDefinitions  // 新增：传入预先提取的所有 CSS 变量
+      allCSSVariableDefinitions,
+      tokens
     );
 
-    // 14. Build final result
-    const externalCSS = allStylesheetTexts.map((text, i) => `/* Stylesheet ${i + 1} */\n${text}`).join('\n\n');
+    await reportProgress(tabId, 'Pruning unused CSS…', 0.94);
+    let relevantCSS = relevantSheets.join('\n\n');
+    if (relevantCSS) {
+      try {
+        const pruned = await chrome.tabs.sendMessage(tabId, {
+          type: 'PRUNE_CSS',
+          html: outerHTML,
+          css: relevantCSS,
+        }) as { css?: string } | undefined;
+        if (typeof pruned?.css === 'string') {
+          relevantCSS = pruned.css;
+        }
+      } catch (err) {
+        console.warn('DOM prune failed, using token filter only:', err);
+      }
+    }
+
+    const css = relevantCSS
+      ? `${assembled.css}\n\n/* ========== Stylesheet rules used by this subtree ========== */\n${relevantCSS}`
+      : assembled.css;
 
     const result: StyleExtractionResult = {
       html: outerHTML,
-      css: assembled.css + (externalCSS ? '\n\n/* ========== External Stylesheets ========== */\n' + externalCSS : ''),
+      css,
       inlineCSS: assembled.inlineCSS,
       matchedCSS: assembled.matchedCSS,
       inheritedCSS: assembled.inheritedCSS,
       pseudoElementCSS: assembled.pseudoElementCSS,
       cssVariables: assembled.cssVariables,
       fontInfo: assembled.fontInfo,
-      styleSheetIds: styleSheetIds,
+      styleSheetIds: assembled.styleSheetIds,
       metadata: {
         selector,
         timestamp: Date.now(),
         pseudoStates,
-        hasPseudoElements: assembled.pseudoElementCSS.length > 0,
-        inheritedDepth: assembled.inheritedCSS.length > 0 ? 1 : 0,
+        hasPseudoElements: assembled.hasPseudoElements,
+        inheritedDepth: assembled.inheritedDepth,
+        descendantCount: descendantIds.length,
       },
     };
 
-    // 15. Save to storage
+    await chrome.storage.local.remove(['extractError', 'extractProgress']);
     await chrome.storage.local.set({ extractResult: result });
 
-    // 16. Notify popup of completion (may fail, ignore errors)
     try {
       await chrome.runtime.sendMessage({ type: 'EXTRACT_COMPLETE' });
     } catch {
-      // Popup 可能已关闭，忽略
-    }
-
-    // 17. Automatically open options page to display results
-    try {
-      await chrome.runtime.openOptionsPage();
-    } catch (e) {
-      console.log('Could not open options page:', e);
+      // Options 可能尚未就绪，忽略
     }
 
   } catch (error) {
     console.error('Extraction error:', error);
-    // 发送错误通知（可能失败，忽略错误）
+    const errorMessage = error instanceof Error ? error.message : 'Extraction failed';
+    try {
+      await chrome.storage.local.remove(['extractResult', 'extractProgress']);
+      await chrome.storage.local.set({ extractError: errorMessage });
+    } catch {
+      // 忽略
+    }
     try {
       await chrome.runtime.sendMessage({
         type: 'EXTRACT_ERROR',
-        error: error instanceof Error ? error.message : 'Extraction failed',
+        error: errorMessage,
       });
     } catch {
       // 忽略
     }
-    throw error; // 重新抛出以便外层处理
+    throw error;
 
   } finally {
     // 取消伪类状态（如果 nodeId 有效）
@@ -326,6 +363,49 @@ chrome.runtime.onInstalled.addListener((details) => {
   console.log('Style Extractor installed:', details.reason);
 });
 
+async function reportProgress(tabId: number, message: string, ratio: number): Promise<void> {
+  const extractProgress = { message, ratio };
+  try {
+    await chrome.storage.local.set({ extractProgress });
+  } catch {
+    // 忽略
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PROGRESS', message, ratio });
+  } catch {
+    // 页面可能已关闭
+  }
+  try {
+    await chrome.runtime.sendMessage({ type: 'EXTRACT_PROGRESS', message, ratio });
+  } catch {
+    // Options 可能尚未打开
+  }
+}
+
+function uniqueIds(ids: number[]): number[] {
+  return [...new Set(ids.filter((id) => id > 0))];
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await fn(items[index]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
 /**
  * 从 CSS 文本中提取所有 CSS 变量定义
  * 用于策略 B：从所有样式表中遍历提取变量
@@ -348,10 +428,7 @@ function extractAllCSSVariables(cssText: string, definitions: Map<string, string
       if (varMatch) {
         const varName = varMatch[1];
         const varValue = varMatch[2].trim();
-        // 只保存第一次出现的定义（CSS 层级优先级）
-        if (!definitions.has(varName)) {
-          definitions.set(varName, varValue);
-        }
+        definitions.set(varName, varValue);
       }
     }
   }

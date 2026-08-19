@@ -14,19 +14,14 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "ignoreDeprecations": "6.0",
-    "outDir": "./dist",
+    "noEmit": true,
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
       "@ext/*": ["./extension/*"]
     },
     "types": ["chrome"]
   },
-  "include": ["src/**/*", "extension/**/*"],
+  "include": ["extension/**/*"],
   "exclude": ["node_modules", "dist"]
 }

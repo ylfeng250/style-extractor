@@ -20,6 +20,7 @@ export interface MatchedCSSRule {
       cssText: string;
     };
     styleSheetId?: string;
+    origin?: string;
   };
   matchingSelectors: number[];
 }
@@ -64,6 +65,7 @@ export interface PlatformFontsForNode {
 export class CDPClient {
   private tabId: number;
   private attached = false;
+  private detachListener: ((source: chrome.debugger.Debuggee) => void) | null = null;
 
   constructor(tabId: number) {
     this.tabId = tabId;
@@ -83,18 +85,23 @@ export class CDPClient {
     await this.sendCommand("CSS.enable");
     await this.sendCommand("Runtime.enable");
 
-    // 监听分离事件
-    chrome.debugger.onDetach.addListener((source) => {
+    this.detachListener = (source) => {
       if (source.tabId === this.tabId) {
         this.attached = false;
       }
-    });
+    };
+    chrome.debugger.onDetach.addListener(this.detachListener);
   }
 
   /**
    * 分离调试器
    */
   async detach(): Promise<void> {
+    if (this.detachListener) {
+      chrome.debugger.onDetach.removeListener(this.detachListener);
+      this.detachListener = null;
+    }
+
     if (!this.attached) return;
 
     await chrome.debugger.detach({ tabId: this.tabId });
@@ -159,8 +166,6 @@ export class CDPClient {
     if (states.active) forcedPseudoClasses.push("active");
     if (states.focus) forcedPseudoClasses.push("focus");
     if (states.visited) forcedPseudoClasses.push("visited");
-
-    if (forcedPseudoClasses.length === 0) return;
 
     await this.sendCommand("CSS.forcePseudoState", {
       nodeId,

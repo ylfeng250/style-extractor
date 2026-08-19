@@ -4,6 +4,7 @@
  */
 
 import type { MatchedStylesForNode, PlatformFont, MatchedCSSRule } from './cdp-client';
+import { narrowSelectorList, type HtmlTokens } from './css-filter';
 
 export interface StyleExtractionResult {
   html: string;
@@ -14,13 +15,14 @@ export interface StyleExtractionResult {
   pseudoElementCSS: string;
   cssVariables: string;
   fontInfo: string;
-  styleSheetIds: Set<string>;
+  styleSheetIds: string[];
   metadata: {
     selector: string;
     timestamp: number;
     pseudoStates: string[];
     hasPseudoElements: boolean;
     inheritedDepth: number;
+    descendantCount: number;
   };
 }
 
@@ -36,8 +38,13 @@ export function assembleStyles(
   pseudoStates: string[] = [],
   rootStyles?: MatchedStylesForNode,
   computedStyles?: Record<string, string>,
-  externalVarDefinitions?: Map<string, string>
-): Omit<StyleExtractionResult, 'html' | 'metadata'> & { styleSheetIds: Set<string> } {
+  externalVarDefinitions?: Map<string, string>,
+  htmlTokens?: HtmlTokens
+): Omit<StyleExtractionResult, 'html' | 'metadata'> & {
+  styleSheetIds: string[];
+  hasPseudoElements: boolean;
+  inheritedDepth: number;
+} {
   const parts: string[] = [];
   const styleSheetIds = new Set<string>();
   let hasPseudoElements = false;
@@ -147,12 +154,7 @@ export function assembleStyles(
   // 2. 处理内联样式
   let inlineCSS = '';
   if (stylesData.inlineStyle?.cssText) {
-    let cssText = stylesData.inlineStyle.cssText;
-    // 策略 D: 如果有计算样式，替换未解析的变量
-    if (computedStyles) {
-      cssText = replaceVariablesWithComputed(cssText, computedStyles);
-    }
-    inlineCSS = `/* Inline Styles */\n${selector} { ${cssText} }\n`;
+    inlineCSS = `/* Inline Styles */\n${selector} { ${stylesData.inlineStyle.cssText} }\n`;
     parts.push(inlineCSS);
   }
 
@@ -163,15 +165,13 @@ export function assembleStyles(
     const rulesText: string[] = [];
 
     for (const rule of stylesData.matchedCSSRules) {
-      const selectorText = rule.rule.selectorList.text;
+      const rawSelector = rule.rule.selectorList.text;
+      const selectorText = htmlTokens
+        ? narrowSelectorList(rawSelector, htmlTokens, true)
+        : rawSelector;
       let styleText = rule.rule.style.cssText;
 
-      if (!styleText) continue;
-
-      // 策略 D: 如果有计算样式，替换未解析的变量
-      if (computedStyles) {
-        styleText = replaceVariablesWithComputed(styleText, computedStyles);
-      }
+      if (!selectorText || !styleText) continue;
 
       // 跳过 :root 和 html 选择器
       if (selectorText === ':root' || selectorText === 'html') continue;
@@ -186,11 +186,7 @@ export function assembleStyles(
       if (seenRules.has(ruleKey)) continue;
       seenRules.add(ruleKey);
 
-      // 过滤掉浏览器默认样式（UA stylesheet）
-      const isUAStyle = !rule.rule.styleSheetId ||
-        (rule as unknown as { origin?: string }).origin === 'user-agent';
-
-      if (!isUAStyle) {
+      if (!isUserAgentRule(rule)) {
         rulesText.push(`${selectorText} {\n  ${formatStyleText(styleText)}\n}`);
       }
     }
@@ -221,15 +217,7 @@ export function assembleStyles(
           let styleText = rule.rule.style.cssText;
           if (!styleText) continue;
 
-          // 策略 D: 替换未解析的变量
-          if (computedStyles) {
-            styleText = replaceVariablesWithComputed(styleText, computedStyles);
-          }
-
-          const isUAStyle = !rule.rule.styleSheetId ||
-            (rule as unknown as { origin?: string }).origin === 'user-agent';
-
-          if (!isUAStyle) {
+          if (!isUserAgentRule(rule)) {
             pseudoParts.push(`${pseudoSelector} {\n  ${formatStyleText(styleText)}\n}`);
             if (rule.rule.styleSheetId) {
               styleSheetIds.add(rule.rule.styleSheetId);
@@ -240,11 +228,7 @@ export function assembleStyles(
 
       // 处理伪元素的内联样式
       if (pseudoEl.style?.cssText) {
-        let cssText = pseudoEl.style.cssText;
-        if (computedStyles) {
-          cssText = replaceVariablesWithComputed(cssText, computedStyles);
-        }
-        pseudoParts.push(`${pseudoSelector} {\n  ${formatStyleText(cssText)}\n}`);
+        pseudoParts.push(`${pseudoSelector} {\n  ${formatStyleText(pseudoEl.style.cssText)}\n}`);
       }
     }
 
@@ -279,18 +263,10 @@ export function assembleStyles(
 
           if (!styleText) continue;
 
-          // 策略 D: 替换未解析的变量
-          if (computedStyles) {
-            styleText = replaceVariablesWithComputed(styleText, computedStyles);
-          }
-
           // 跳过 :root 和 html
           if (ruleSelectorText === ':root' || ruleSelectorText === 'html') continue;
 
-          const isUAStyle = !rule.rule.styleSheetId ||
-            (rule as unknown as { origin?: string }).origin === 'user-agent';
-
-          if (!isUAStyle) {
+          if (!isUserAgentRule(rule)) {
             // 只保留可继承的属性
             const inheritedProps = filterInheritedProperties(styleText);
             if (inheritedProps.trim()) {
@@ -333,8 +309,61 @@ export function assembleStyles(
     pseudoElementCSS,
     cssVariables,
     fontInfo,
-    styleSheetIds,
+    styleSheetIds: [...styleSheetIds],
+    hasPseudoElements,
+    inheritedDepth,
   };
+}
+
+export function mergeDescendantStyles(
+  root: MatchedStylesForNode,
+  descendants: MatchedStylesForNode[]
+): MatchedStylesForNode {
+  if (descendants.length === 0) return root;
+
+  const matchedCSSRules = [...(root.matchedCSSRules || [])];
+  const pseudoElements = [...(root.pseudoElements || [])];
+
+  for (const descendant of descendants) {
+    if (descendant.matchedCSSRules) {
+      matchedCSSRules.push(...descendant.matchedCSSRules);
+    }
+    if (descendant.pseudoElements) {
+      pseudoElements.push(...descendant.pseudoElements);
+    }
+  }
+
+  return {
+    ...root,
+    matchedCSSRules,
+    pseudoElements,
+  };
+}
+
+export function collectStyleSheetIds(styles: MatchedStylesForNode, ids: Set<string>): void {
+  for (const rule of styles.matchedCSSRules || []) {
+    if (rule.rule.styleSheetId) {
+      ids.add(rule.rule.styleSheetId);
+    }
+  }
+
+  for (const inherited of styles.inherited || []) {
+    for (const rule of inherited.matchedCSSRules || []) {
+      if (rule.rule.styleSheetId) {
+        ids.add(rule.rule.styleSheetId);
+      }
+    }
+  }
+
+  for (const pseudoEl of (styles.pseudoElements || []) as Array<{
+    matches?: Array<{ rule: { styleSheetId?: string } }>;
+  }>) {
+    for (const rule of pseudoEl.matches || []) {
+      if (rule.rule.styleSheetId) {
+        ids.add(rule.rule.styleSheetId);
+      }
+    }
+  }
 }
 
 /**
@@ -453,6 +482,7 @@ function resolveVariableDependencies(
 
   while (toResolve.size > 0) {
     const current = toResolve.values().next().value;
+    if (!current) break;
     toResolve.delete(current);
 
     if (resolved.has(current) || unresolved.has(current)) continue;
@@ -538,6 +568,22 @@ function parseVariableDefinitions(cssText: string, definitions: Map<string, stri
       definitions.set(match[1], match[2].trim());
     }
   }
+}
+
+function isUserAgentRule(rule: MatchedCSSRule): boolean {
+  if (rule.rule.origin) {
+    return rule.rule.origin === 'user-agent';
+  }
+  return !rule.rule.styleSheetId;
+}
+
+function escapeHTML(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -637,31 +683,22 @@ export function generateFullHTML(
   title = 'Extracted Style'
 ): string {
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${escapeHTML(title)}</title>
   <style>
-/* 重置样式 */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+html, body { margin: 0; }
+body { padding: 24px; }
+[hidden] { display: none !important; }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  padding: 20px;
-  background: #f5f5f5;
-}
-
-/* 提取的样式 */
+/* Extracted styles */
 ${css}
   </style>
 </head>
 <body>
-${elementHTML}
+${sanitizeHTML(elementHTML)}
 </body>
 </html>`;
 }
